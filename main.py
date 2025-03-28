@@ -2,7 +2,7 @@ import os
 from sklearn.model_selection import train_test_split
 
 from utils import setup_mlflow_tracking
-from data_preprocessing import read_dataframe
+from data_preprocessing import read_dataframe, engineer_features
 from model_training import train_models, train_custom_model, predict_trip_duration
 from loguru import logger
 
@@ -21,6 +21,10 @@ def main():
     # Read and preprocess data
     df = read_dataframe(input_file)
     logger.info(f"Reading from data:\n{df.head(10)}")
+
+        # Read and preprocess data
+    feature_eng = engineer_features(df)
+    logger.info(f"Reading from data:\n{feature_eng.head(10)}")
 
 
     # Split data into train and validation sets
