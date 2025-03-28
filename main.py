@@ -1,9 +1,10 @@
 import os
 from sklearn.model_selection import train_test_split
 
-from utility import setup_mlflow_tracking
+from utils import setup_mlflow_tracking
 from data_preprocessing import read_dataframe
 from model_training import train_models, train_custom_model, predict_trip_duration
+from loguru import logger
 
 def main():
     # Set up MLflow tracking
@@ -19,6 +20,8 @@ def main():
 
     # Read and preprocess data
     df = read_dataframe(input_file)
+    logger.info(f"Reading from data:\n{df.head(10)}")
+
 
     # Split data into train and validation sets
     train_data, val_data = train_test_split(df, test_size=0.2, random_state=42)
@@ -35,10 +38,10 @@ def main():
     # Example prediction (you can modify this part as needed)
     sample_data = val_data.head(10)
     rf_predictions = predict_trip_duration(custom_rf_model, sample_data, feature_engineering=True)
-    print("Random Forest Predictions:", rf_predictions)
+    logger.info(f"Random Forest Predictions:{rf_predictions}")
 
     gb_predictions = predict_trip_duration(custom_gb_model, sample_data, feature_engineering=True)
-    print("Gradient Boosting Predictions:", gb_predictions)
+    logger.info(f"Gradient Boosting Predictions: {gb_predictions}")
 
 if __name__ == "__main__":
     main()
