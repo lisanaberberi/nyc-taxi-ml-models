@@ -74,7 +74,7 @@ def train_models(train_data, test_data, target='duration'):
 
             # after training your model
             input_example = train_data.iloc[:5]  # or a representative example
-            signature = infer_signature(train_data, model.predict(train_data))
+            signature = infer_signature(train_data, model.predict(dict_train))
 
             y_pred = model.predict(dict_test)
             log_model_metrics(y_test, y_pred, model_name)
