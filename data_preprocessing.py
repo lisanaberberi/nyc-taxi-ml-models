@@ -3,6 +3,7 @@ import pickle
 import click
 import pandas as pd
 from sklearn.feature_extraction import DictVectorizer
+from sklearn.model_selection import train_test_split
 
 def dump_pickle(obj, filename: str):
     """
@@ -16,11 +17,15 @@ def read_dataframe(filename: str):
     Read and preprocess a single parquet file
     """
     df = pd.read_parquet(filename)
+    print("Original dataset info: ", df.info())
+    print("Original data prior to transformation: ", df.head(10))
+    print("Original data columns: ", list(df.columns))
     df['duration'] = df['lpep_dropoff_datetime'] - df['lpep_pickup_datetime']
     df.duration = df.duration.apply(lambda td: td.total_seconds() / 60)
     df = df[(df.duration >= 1) & (df.duration <= 60)]
     categorical = ['PULocationID', 'DOLocationID']
     df[categorical] = df[categorical].astype(str)
+    print(df.head(10))
     return df
 
 def load_multiple_dataframes(raw_data_path: str, dataset: str, months: list):
@@ -105,7 +110,6 @@ def preprocess(df: pd.DataFrame, dv: DictVectorizer, fit_dv: bool = False):
     """
     Preprocess the dataframe using DictVectorizer from prepare_dictionaries()
     """
-    #dicts = df[categorical + numerical].to_dict(orient='records')
     dicts = prepare_dictionaries(df)
     
     if fit_dv:
@@ -145,26 +149,20 @@ def run_data_prep(raw_data_path: str, dest_path: str, dataset: str):
         '2024-12'
     ]
     
-    # Split months for train, validation, and test
-    train_months = months[:4]     # July-October
-    val_months = months[4:5]      # November
-    test_months = months[5:]      # December
+    # Load all data first
+    df = load_multiple_dataframes(raw_data_path, dataset, months)
+    
+    # Split into 80% train and 20% test
+    df_train, df_test = train_test_split(df, test_size=0.2, random_state=42)
 
-    # Load dataframes for each split
-    df_train = load_multiple_dataframes(raw_data_path, dataset, train_months)
-    df_val = load_multiple_dataframes(raw_data_path, dataset, val_months)
-    df_test = load_multiple_dataframes(raw_data_path, dataset, test_months)
-
-    # Extract the target (tip_amount)
-    target = 'tip_amount'
+    # Extract the target (duration)
+    target = 'duration'
     y_train = df_train[target].values
-    y_val = df_val[target].values
     y_test = df_test[target].values
 
     # Fit the DictVectorizer and preprocess data
     dv = DictVectorizer()
     X_train, dv = preprocess(df_train, dv, fit_dv=True)
-    X_val, _ = preprocess(df_val, dv, fit_dv=False)
     X_test, _ = preprocess(df_test, dv, fit_dv=False)
 
     # Create dest_path folder unless it already exists
@@ -173,13 +171,15 @@ def run_data_prep(raw_data_path: str, dest_path: str, dataset: str):
     # Save DictVectorizer and datasets
     dump_pickle(dv, os.path.join(dest_path, "dv.pkl"))
     dump_pickle((X_train, y_train), os.path.join(dest_path, "train.pkl"))
-    dump_pickle((X_val, y_val), os.path.join(dest_path, "val.pkl"))
     dump_pickle((X_test, y_test), os.path.join(dest_path, "test.pkl"))
 
     # Print some information about the processed data
     print(f"Train data shape: {X_train.shape}")
-    print(f"Validation data shape: {X_val.shape}")
     print(f"Test data shape: {X_test.shape}")
+    print(f"Train size: {len(df_train)} samples ({len(df_train)/len(df)*100:.1f}%)")
+    print(f"Test size: {len(df_test)} samples ({len(df_test)/len(df)*100:.1f}%)")
+    
+    return df_train, df_test
 
 if __name__ == '__main__':
     run_data_prep()
