@@ -100,7 +100,8 @@ def prepare_dictionaries(df: pd.DataFrame):
     Returns:
     - List of dictionaries with features
     """
-    df['PU_DO'] = df['PULocationID'] + '_' + df['DOLocationID']
+    df = df.copy()
+    df['PU_DO'] = df['PULocationID'].astype(str) + '_' + df['DOLocationID'].astype(str)
     categorical = ['PU_DO']
     numerical = ['trip_distance']
     dicts = df[categorical + numerical].to_dict(orient='records')
