@@ -159,13 +159,13 @@ def train_custom_model(train_data, test_data, target='duration', model_type='ran
 
         # Inference sample
         input_example = X_train.head(5)
-        #predictions = model.predict(X_train.head(5))
-        signature = infer_signature(X_train, model.predict(X_train))
 
         mlflow.log_input(mlflow.data.from_pandas(input_example), context="training_engineered")
 
         pipeline.fit(X_train, y_train)
         y_pred = pipeline.predict(X_test)
+
+        signature = infer_signature(X_train, model.predict(X_train))
 
         log_model_metrics(y_test, y_pred, f"custom_{model_type}")
         mlflow.sklearn.log_model(pipeline, f"custom_{model_type}_model", 
