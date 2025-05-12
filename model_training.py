@@ -14,6 +14,7 @@ from sklearn.model_selection import train_test_split
 from utils import log_model_metrics
 from data_preprocessing import engineer_features, prepare_dictionaries
 
+
 # Generate run datetime
 run_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -89,6 +90,12 @@ def train_models(train_data, val_data, target='duration'):
             # Fit model
             model = model_config['model']
             model.fit(dict_train, y_train)
+
+            # Log dataset source files or in-memory DataFrames as InputDatasets
+            mlflow.log_input(mlflow.data.from_pandas(train_data, source="file://data/green_tripdata_2024-07.parquet"), context="training")
+            mlflow.log_input(mlflow.data.from_pandas(val_data, source="file://data/green_tripdata_2024-11.parquet"), context="validation")
+        
+            
             # Predict and evaluate
             y_pred = model.predict(dict_val)
             
@@ -99,6 +106,8 @@ def train_models(train_data, val_data, target='duration'):
                 model_name, 
                 params=model_config['params']
             )
+            
+
             # Log model
             mlflow.sklearn.log_model(model, artifact_path=f"{model_name}_model")
             # Store results
@@ -177,6 +186,10 @@ def train_custom_model(train_data, val_data, target='duration', model_type='rand
 
     # Start MLflow run
     with mlflow.start_run(run_name=f"custom_{model_type}_{run_datetime}"):
+
+        # Log feature engineered datasets
+        mlflow.log_input(mlflow.data.from_pandas(train_data, source="feature_eng_training"), context="training_engineered")
+        mlflow.log_input(mlflow.data.from_pandas(val_data, source="feature_eng_validation"), context="validation_engineered")
         # Fit the model
         pipeline.fit(X_train, y_train)
         
