@@ -7,6 +7,12 @@ from model_training import train_models, train_custom_model, predict_trip_durati
 from loguru import logger
 from data_preprocessing import load_multiple_dataframes
 
+import mlflow
+from datetime import datetime
+
+# Generate run datetime
+run_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
+
 def main():
     # Set up MLflow tracking
     setup_mlflow_tracking()
@@ -32,19 +38,27 @@ def main():
     logger.info(f"Engineered Train Data preview:\n{feature_eng_train_data.head(10)}")
     
     # Train models on raw data (without feature engineering)
-    multiple_models = train_models(train_data, test_data)
+    #multiple_models = train_models(train_data, test_data)
     
     # Train custom models on feature-engineered data
-    custom_rf_model = train_custom_model(feature_eng_train_data, feature_eng_test_data, model_type='random_forest')
-    custom_gb_model = train_custom_model(feature_eng_train_data, feature_eng_test_data, model_type='gradient_boosting')
-    custom_dt_model = train_custom_model(feature_eng_train_data, feature_eng_test_data, model_type='decision_tree')
-    custom_xgb_model = train_custom_model(feature_eng_train_data, feature_eng_test_data, model_type='xgboost')
+        # Start a single parent run
+    with mlflow.start_run(run_name=f"custom_models_{run_datetime}") as parent_run:
+        # Loop through each model type and create a nested run
+        for model_type in ['random_forest', 'gradient_boosting', 'decision_tree', 'xgboost']:
+            train_custom_model(
+                train_data=feature_eng_train_data,
+                test_data=feature_eng_test_data,
+                model_type=model_type
+            )
 
     # Example prediction 
     sample_data = test_data.head(10)
+
+    custom_rf_model = train_custom_model(feature_eng_train_data, feature_eng_test_data, model_type='random_forest')
     rf_predictions = predict_trip_duration(custom_rf_model, sample_data, feature_engineering=True)
     logger.info(f"Random Forest Predictions: {rf_predictions}")
 
+    custom_gb_model = train_custom_model(feature_eng_train_data, feature_eng_test_data, model_type='gradient_boosting')
     gb_predictions = predict_trip_duration(custom_gb_model, sample_data, feature_engineering=True)
     logger.info(f"Gradient Boosting Predictions: {gb_predictions}")
 

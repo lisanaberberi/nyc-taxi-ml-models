@@ -8,6 +8,11 @@ from sklearn.metrics import (
     mean_absolute_percentage_error
 )
 
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.tree import DecisionTreeRegressor
+import xgboost as xgb
+
+
 def setup_mlflow_tracking(
     tracking_uri="http://localhost:5000", 
     experiment_name="green-taxi-duration-mlmodels-evaluations",
@@ -42,7 +47,7 @@ def log_model_metrics(y_true, y_pred, model_name, params=None):
     - params (dict, optional): Model parameters
     """
     # Calculate metrics
-    rmse = mean_squared_error(y_true, y_pred)
+    mse = mean_squared_error(y_true, y_pred)
     mae = mean_absolute_error(y_true, y_pred)
     r2 = r2_score(y_true, y_pred)
     mape = mean_absolute_percentage_error(y_true, y_pred)
@@ -53,7 +58,7 @@ def log_model_metrics(y_true, y_pred, model_name, params=None):
     
     # Log metrics
     mlflow.log_metrics({
-        'rmse': rmse,
+        'mse': mse,
         'mae': mae,
         'r2': r2,
         'mape': mape
@@ -61,7 +66,71 @@ def log_model_metrics(y_true, y_pred, model_name, params=None):
     
     # Print metrics
     print(f"{model_name.upper()} Performance:")
-    print(f"RMSE: {rmse}")
+    print(f"MSE: {mse}")
     print(f"MAE: {mae}")
     print(f"R²: {r2}")
     print(f"MAPE: {mape}")
+
+
+def log_model_parameters(model, model_name):
+    """
+    Comprehensive parameter logging for different model types
+    
+    Args:
+    - model: Scikit-learn or XGBoost model
+    - model_name: Name of the model for context
+    """
+    # Generic parameters for all models
+    try:
+        random_state = getattr(model, 'random_state', 'N/A')
+        mlflow.log_param(f"{model_name}_random_state", random_state)
+    except Exception as e:
+        print(f"Could not log random_state for {model_name}: {e}")
+
+    # Model-specific parameter logging
+    try:
+        if isinstance(model, RandomForestRegressor):
+            mlflow.log_params({
+                f"{model_name}_n_estimators": model.n_estimators,
+                f"{model_name}_max_depth": model.max_depth if model.max_depth is not None else 'None',
+                f"{model_name}_min_samples_leaf": model.min_samples_leaf,
+                f"{model_name}_max_features": model.max_features if model.max_features is not None else 'None',
+                f"{model_name}_bootstrap": model.bootstrap
+            })
+        
+        elif isinstance(model, GradientBoostingRegressor):
+            mlflow.log_params({
+                f"{model_name}_n_estimators": model.n_estimators,
+                f"{model_name}_max_depth": model.max_depth,
+                f"{model_name}_learning_rate": model.learning_rate,
+                f"{model_name}_min_samples_leaf": model.min_samples_leaf,
+                f"{model_name}_max_features": model.max_features if model.max_features is not None else 'None'
+            })
+        
+        elif isinstance(model, xgb.XGBRegressor):
+            mlflow.log_params({
+                f"{model_name}_n_estimators": model.n_estimators,
+                f"{model_name}_max_depth": model.max_depth,
+                f"{model_name}_learning_rate": model.learning_rate,
+                f"{model_name}_booster": model.booster,
+                f"{model_name}_gamma": model.gamma,
+                f"{model_name}_subsample": model.subsample,
+                f"{model_name}_colsample_bytree": model.colsample_bytree
+            })
+        
+        elif isinstance(model, DecisionTreeRegressor):
+            mlflow.log_params({
+                f"{model_name}_max_depth": model.max_depth,
+                f"{model_name}_min_samples_leaf": model.min_samples_leaf,
+                f"{model_name}_min_samples_split": model.min_samples_split,
+                f"{model_name}_criterion": model.criterion
+            })
+        
+        else:
+            # Log generic model parameters if the specific type is not recognized
+            print(f"Generic parameter logging for {model_name}")
+            generic_params = {k: v for k, v in model.__dict__.items() if isinstance(v, (int, float, str, bool))}
+            mlflow.log_params({f"{model_name}_{k}": v for k, v in generic_params.items()})
+    
+    except Exception as e:
+        print(f"Error logging parameters for {model_name}: {e}")

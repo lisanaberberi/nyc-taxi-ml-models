@@ -16,6 +16,8 @@ from data_preprocessing import engineer_features, prepare_dictionaries
 
 from mlflow.models import infer_signature
 
+from utils import log_model_parameters
+
 # Generate run datetime
 run_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -36,61 +38,80 @@ def train_models(train_data, test_data, target='duration'):
     dict_train = prepare_dictionaries(train_data)
     dict_test = prepare_dictionaries(test_data)
 
-    
-    models = {
-        'random_forest': {
-            'model': make_pipeline(
-                DictVectorizer(),
-                RandomForestRegressor(n_estimators=100, max_depth=20, min_samples_leaf=10, random_state=42)
-            )
-        },
-        'xgboost': {
-            'model': make_pipeline(
-                DictVectorizer(),
-                xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42)
-            )
-        },
-        'decision_tree': {
-            'model': make_pipeline(
-                DictVectorizer(),
-                DecisionTreeRegressor(max_depth=10, min_samples_leaf=5, random_state=42)
-            )
-        },
-        'gradient_boosting': {
-            'model': make_pipeline(
-                DictVectorizer(),
-                GradientBoostingRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42)
-            )
+     # Start a parent run for all baseline models
+    with mlflow.start_run(run_name=f"baseline_models_{run_datetime}") as parent_run:
+        models = {
+            'random_forest': {
+                'model': make_pipeline(
+                    DictVectorizer(),
+                    RandomForestRegressor(n_estimators=100, max_depth=20, min_samples_leaf=10, random_state=42)
+                )
+            },
+            'xgboost': {
+                'model': make_pipeline(
+                    DictVectorizer(),
+                    xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42)
+                )
+            },
+            'decision_tree': {
+                'model': make_pipeline(
+                    DictVectorizer(),
+                    DecisionTreeRegressor(max_depth=10, min_samples_leaf=5, random_state=42)
+                )
+            },
+            'gradient_boosting': {
+                'model': make_pipeline(
+                    DictVectorizer(),
+                    GradientBoostingRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42)
+                )
+            }
         }
-    }
-    
-    results = {}
-    for model_name, model_config in models.items():
-        with mlflow.start_run(run_name=f"{model_name}_{run_datetime}"):
-            model = model_config['model']
-            model.fit(dict_train, y_train)
+        
+        results = {}
+        for model_name, model_config in models.items():
+            # Create nested runs within the parent run
+            with mlflow.start_run(nested=True, run_name=f"{model_name}_{run_datetime}"):
+            #with mlflow.start_run(run_name=f"{model_name}_{run_datetime}"):
+                model = model_config['model']
+                model.fit(dict_train, y_train)
+                
+                # Log model parameters
+                log_model_parameters(model, 'my_model')
 
-            mlflow.log_input(mlflow.data.from_pandas(train_data, source="file:///data/green_tripdata_2024-07.parquet"), context="training")
+                mlflow.log_input(mlflow.data.from_pandas(train_data, source="file:///data/green_tripdata_2024-07.parquet"), context="training")
 
-            # after training your model
-            input_example = train_data.iloc[:5]  # or a representative example
-            signature = infer_signature(train_data, model.predict(dict_train))
+                # after training your model
 
-            y_pred = model.predict(dict_test)
-            log_model_metrics(y_test, y_pred, model_name)
+                input_example = train_data.head(5)
+                input_example = input_example.where(pd.notnull(input_example), None)  # replace NaN with None
 
-            mlflow.sklearn.log_model(model, 
-                                     artifact_path=f"{model_name}_model",
-                                             input_example=input_example,
-                                             signature=signature)
-            results[model_name] = {'model': model, 'y_pred': y_pred}
+
+                #input_example = train_data.iloc[:5]  # or a representative example
+                signature = infer_signature(train_data, model.predict(dict_train))
+
+                y_pred = model.predict(dict_test)
+                log_model_metrics(y_test, y_pred, model_name)
+
+                mlflow.sklearn.log_model(model, 
+                                        artifact_path=f"{model_name}_model",
+                                                input_example=input_example,
+                                                signature=signature)
+                results[model_name] = {'model': model, 'y_pred': y_pred}
 
         #mlflow.end_run()
     return results
 
+
+def collapse_top_n(df, col, n=50):
+    top = df[col].value_counts().nlargest(n).index
+    df = df.copy()
+    df[col] = df[col].cat.add_categories('other')
+    df[col] = df[col].where(df[col].isin(top), 'other')
+    return df
+
 def train_custom_model(train_data, test_data, target='duration', model_type='random_forest'):
     """
-    Train a custom model with feature engineering using train/test only
+    Train a custom model with feature engineering and optimized MLflow logging
     
     Args:
     - train_data (pd.DataFrame): Training data
@@ -101,90 +122,103 @@ def train_custom_model(train_data, test_data, target='duration', model_type='ran
     Returns:
     - Trained model pipeline
     """
+
+    # Feature engineering
     train_data = engineer_features(train_data)
     test_data = engineer_features(test_data)
-
-    # Print DataFrames after feature engineering
-    print("Train Data after Feature Engineering:")
-    print(train_data.head())
-
-    print("\nTest Data after Feature Engineering:")
-    print(test_data.head())
-
-
-    int_cols = ['pickup_hour', 'pickup_month', 'is_weekend']
-
-    # Convert integer columns to Int64 (nullable integers)
-    for col in int_cols:
-        train_data[col] = train_data[col].astype('Int64')
-        test_data[col] = test_data[col].astype('Int64')
-
-
-    features = [
-        'trip_distance', 'PULocationID', 'DOLocationID',
-        'pickup_hour', 'pickup_month', 'is_weekend',
-        'PU_DO', 'time_of_day'
-    ]
-
+    
+    # Prepare features
     numerical_features = ['trip_distance', 'pickup_hour', 'pickup_month', 'is_weekend']
-    categorical_features = ['PULocationID', 'DOLocationID', 'PU_DO', 'time_of_day']
-
+    #categorical_features = ['PULocationID', 'DOLocationID', 'PU_DO', 'time_of_day']
+    categorical_features = ['PU_DO', 'time_of_day']
+    
     X_train = train_data[numerical_features + categorical_features]
     y_train = train_data[target]
     X_test = test_data[numerical_features + categorical_features]
     y_test = test_data[target]
 
+    # sample_size = 1000
+    # train_data_small = train_data.sample(n=sample_size, random_state=42)
+    # test_data_small  = test_data.sample(n=sample_size, random_state=42)
+    
+    # Preprocessor
     preprocessor = ColumnTransformer([
         ('num', StandardScaler(), numerical_features),
         ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
     ])
+    
 
-    if model_type == 'random_forest':
-        model = RandomForestRegressor(n_estimators=100, random_state=42)
-    elif model_type == 'gradient_boosting':
-        model = GradientBoostingRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42)
-    elif model_type == 'xgboost':
-        model = xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42)
-    elif model_type == 'decision_tree':
-        model = DecisionTreeRegressor(max_depth=10, min_samples_leaf=5, random_state=42)
-    else:
+    # Model selection
+    model_map = {
+        'random_forest': RandomForestRegressor(n_estimators=5, random_state=42),
+        'gradient_boosting': GradientBoostingRegressor(n_estimators=5, max_depth=5, learning_rate=0.1, random_state=42),
+        'xgboost': xgb.XGBRegressor(n_estimators=5, max_depth=6, learning_rate=0.1, random_state=42),
+        'decision_tree': DecisionTreeRegressor(max_depth=10, min_samples_leaf=5, random_state=42)
+    }
+    print("Test2")
+    
+    if model_type not in model_map:
         raise ValueError(f"Unsupported model type: {model_type}")
-
+    
+    # Create pipeline
     pipeline = Pipeline([
         ('preprocessor', preprocessor),
-        ('regressor', model)
+        ('regressor', model_map[model_type])
     ])
+    
+    # MLflow logging with minimal overhead
+    with mlflow.start_run(nested=True, run_name=f"custom_model_{model_type}_{run_datetime}"):
+        try:
 
-    with mlflow.start_run(run_name=f"custom_{model_type}_{run_datetime}"):
+            print(X_train.shape, X_train.head())
+            print(y_train.shape, y_train.head())
+            print(X_train.isnull().sum())
 
-        # Inference sample
-        input_example = X_train.head(5)
+            # Collapse rare categories
+            for c in ['PULocationID','DOLocationID','PU_DO']:
+                train_data = collapse_top_n(train_data, c, n=50)
+                test_data  = collapse_top_n(test_data,  c, n=50)
 
-        mlflow.log_input(mlflow.data.from_pandas(input_example), context="training_engineered")
+            pipeline.fit(X_train, y_train)
+            print("TEST3")
+            y_pred = pipeline.predict(X_test)
 
-        pipeline.fit(X_train, y_train)
-        y_pred = pipeline.predict(X_test)
+            # Log model parameters
+            #log_model_parameters(model_type, 'my_model')
+            log_model_parameters(pipeline.named_steps['regressor'], 'custom_' + model_type)
+            
+            # Log metrics and metadata
+            log_model_metrics(y_test, y_pred, f"custom_{model_type}")
+            mlflow.set_tags({
+                'model_type': f'custom_{model_type}',
+                'feature_engineering': 'applied'
+            })
 
-        signature = infer_signature(X_train, model.predict(X_train))
-
-        log_model_metrics(y_test, y_pred, f"custom_{model_type}")
-        mlflow.sklearn.log_model(pipeline, f"custom_{model_type}_model", 
-                                 input_example=input_example,
-                                 signature=signature)
+            mlflow.sklearn.log_model(pipeline, f"custom_{model_type}_model")#, 
+                        #input_example=train_data,
+                        # signature=signature)
+            
+            # Efficient model logging
+            # small_sample = X_train.head(3)
+            # mlflow.sklearn.log_model(
+            #     pipeline, 
+            #     artifact_path=f"custom_{model_type}_model",
+            #     input_example=small_sample,
+            #     signature=mlflow.models.infer_signature(
+            #         small_sample, 
+            #         pipeline.predict(small_sample)
+            #     )
+            #)
+        
+        except Exception as e:
+            mlflow.log_param('error', str(e))
+            print(f"Error in custom model {model_type}: {e}")
 
     return pipeline
 
 def predict_trip_duration(model, input_data, feature_engineering=False):
     """
-    Predict trip duration
-    
-    Args:
-    - model: Trained model pipeline
-    - input_data: DataFrame with trip features
-    - feature_engineering (bool): Whether to apply feature engineering
-    
-    Returns:
-    - Predictions
+    Predict trip duration with optional feature engineering
     """
     if feature_engineering:
         input_data = engineer_features(input_data)
@@ -194,7 +228,5 @@ def predict_trip_duration(model, input_data, feature_engineering=False):
             'PU_DO', 'time_of_day'
         ]
         input_data = input_data[features]
-    else:
-        input_data = prepare_dictionaries(input_data)
-
+    
     return model.predict(input_data)
