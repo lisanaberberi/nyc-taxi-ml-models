@@ -11,7 +11,7 @@ from sklearn.metrics import (
 def setup_mlflow_tracking(
     tracking_uri="http://localhost:5000", 
     experiment_name="green-taxi-duration-mlmodels-evaluations",
-    # username=<your-email-address> #if you have setup postgres/mysql as a backend dB
+    # MLFLOW_TRACKING_USERNAME=<your-email-address> #if you have setup postgres/mysql as a backend dB
 ):
     """
     Set up MLflow tracking with configurable server and credentials
