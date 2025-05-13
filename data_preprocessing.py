@@ -101,6 +101,10 @@ def prepare_dictionaries(df: pd.DataFrame):
     - List of dictionaries with features
     """
     df = df.copy()
+
+     # Remove the target if present
+    df = df.drop(columns=['duration'], errors='ignore')
+
     df['PU_DO'] = df['PULocationID'].astype(str) + '_' + df['DOLocationID'].astype(str)
     categorical = ['PU_DO']
     numerical = ['trip_distance']

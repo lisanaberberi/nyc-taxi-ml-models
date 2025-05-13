@@ -38,7 +38,7 @@ def main():
     logger.info(f"Engineered Train Data preview:\n{feature_eng_train_data.head(10)}")
     
     # Train models on raw data (without feature engineering)
-    #multiple_models = train_models(train_data, test_data)
+    multiple_models = train_models(train_data, test_data)
     
     # Train custom models on feature-engineered data
         # Start a single parent run

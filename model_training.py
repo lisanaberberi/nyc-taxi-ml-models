@@ -38,6 +38,9 @@ def train_models(train_data, test_data, target='duration'):
     dict_train = prepare_dictionaries(train_data)
     dict_test = prepare_dictionaries(test_data)
 
+    # Build a pure-feature DataFrame from dict_train (no 'duration' in keys)
+    X_train = pd.DataFrame(dict_train)
+
      # Start a parent run for all baseline models
     with mlflow.start_run(run_name=f"baseline_models_{run_datetime}") as parent_run:
         models = {
@@ -68,37 +71,55 @@ def train_models(train_data, test_data, target='duration'):
         }
         
         results = {}
-        for model_name, model_config in models.items():
+        for model_name, model_cfg in models.items():
             # Create nested runs within the parent run
             with mlflow.start_run(nested=True, run_name=f"{model_name}_{run_datetime}"):
             #with mlflow.start_run(run_name=f"{model_name}_{run_datetime}"):
-                model = model_config['model']
-                model.fit(dict_train, y_train)
+
+                #train 
+                pipeline = model_cfg['model']
+                pipeline.fit(dict_train, y_train)
+                preds = pipeline.predict(dict_test)
                 
                 # Log model parameters
-                log_model_parameters(model, 'my_model')
+
+                final_estimator = pipeline.steps[-1][1]
+                log_model_parameters(final_estimator, model_name)
+
+                # log metrics
+                log_model_metrics(y_test, preds, model_name)
 
                 mlflow.log_input(mlflow.data.from_pandas(train_data, source="file:///data/green_tripdata_2024-07.parquet"), context="training")
 
                 # after training your model
+                # infer signature once
+                #input_example = train_data.head(5).where(pd.notnull(train_data.head(5)), None)
+                signature = infer_signature(X_train, pipeline.predict(dict_train))
+                input_example  = X_train.head(5)
 
-                input_example = train_data.head(5)
-                input_example = input_example.where(pd.notnull(input_example), None)  # replace NaN with None
+                # choose the correct logger
+                if model_name == 'xgboost':
+                    # extract the raw XGBRegressor from the pipeline
+                    booster = pipeline.named_steps['xgbregressor']
+                    mlflow.xgboost.log_model(
+                        xgb_model=booster,
+                        artifact_path=f"{model_name}_model",
+                        input_example=input_example,
+                        signature=signature
+                    )
+                else:
+                    mlflow.sklearn.log_model(
+                        sk_model=pipeline,
+                        artifact_path=f"{model_name}_model",
+                        input_example=input_example,
+                        signature=signature
+                    )
+                # mlflow.sklearn.log_model(model, 
+                #                         artifact_path=f"{model_name}_model",
+                #                                 input_example=input_example,
+                #                                 signature=signature)
+                results[model_name] = {'model': pipeline, 'y_pred': preds}
 
-
-                #input_example = train_data.iloc[:5]  # or a representative example
-                signature = infer_signature(train_data, model.predict(dict_train))
-
-                y_pred = model.predict(dict_test)
-                log_model_metrics(y_test, y_pred, model_name)
-
-                mlflow.sklearn.log_model(model, 
-                                        artifact_path=f"{model_name}_model",
-                                                input_example=input_example,
-                                                signature=signature)
-                results[model_name] = {'model': model, 'y_pred': y_pred}
-
-        #mlflow.end_run()
     return results
 
 
@@ -150,12 +171,11 @@ def train_custom_model(train_data, test_data, target='duration', model_type='ran
 
     # Model selection
     model_map = {
-        'random_forest': RandomForestRegressor(n_estimators=5, random_state=42),
-        'gradient_boosting': GradientBoostingRegressor(n_estimators=5, max_depth=5, learning_rate=0.1, random_state=42),
-        'xgboost': xgb.XGBRegressor(n_estimators=5, max_depth=6, learning_rate=0.1, random_state=42),
+        'random_forest': RandomForestRegressor(n_estimators=100, random_state=42),
+        'gradient_boosting': GradientBoostingRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42),
+        'xgboost': xgb.XGBRegressor(n_estimators=100, max_depth=6, learning_rate=0.1, random_state=42),
         'decision_tree': DecisionTreeRegressor(max_depth=10, min_samples_leaf=5, random_state=42)
     }
-    print("Test2")
     
     if model_type not in model_map:
         raise ValueError(f"Unsupported model type: {model_type}")
@@ -180,7 +200,6 @@ def train_custom_model(train_data, test_data, target='duration', model_type='ran
                 test_data  = collapse_top_n(test_data,  c, n=50)
 
             pipeline.fit(X_train, y_train)
-            print("TEST3")
             y_pred = pipeline.predict(X_test)
 
             # Log model parameters
@@ -194,7 +213,21 @@ def train_custom_model(train_data, test_data, target='duration', model_type='ran
                 'feature_engineering': 'applied'
             })
 
-            mlflow.sklearn.log_model(pipeline, f"custom_{model_type}_model")#, 
+            # model logging check
+            if model_type == 'xgboost':
+                # for XGBoost use its native logger
+                mlflow.xgboost.log_model(
+                    xgb_model=pipeline.named_steps['xgbregressor'],
+                    artifact_path=f"custom_{model_type}_model"
+                )
+            else:
+                # for sklearn-based estimators
+                mlflow.sklearn.log_model(
+                    sk_model=pipeline,
+                    artifact_path=f"custom_{model_type}_model"
+                )
+
+           # mlflow.sklearn.log_model(pipeline, f"custom_{model_type}_model")#, 
                         #input_example=train_data,
                         # signature=signature)
             
