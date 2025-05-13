@@ -47,12 +47,13 @@ Plots in `./plots/` include:
 - **Trip Counts**
 - **Feature Distributions**
 
-## 🛠️ How to Run
+## 🛠️ Usage
+
+Run the main script with the following command:
 
 ```bash
 python main.py --raw_data_path <path_to_raw_data> --dest_path <path_to_save_results> --dataset <dataset_type>
 
+#Install requirements  
 
-1️⃣ Install requirements  
-```bash
 pip install -r requirements.txt
