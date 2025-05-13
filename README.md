@@ -52,8 +52,8 @@ Plots in `./plots/` include:
 Run the main script with the following command:
 
 ```bash
+#First install requirements 
+pip install -r requirements.txt
+
 python main.py --raw_data_path <path_to_raw_data> --dest_path <path_to_save_results> --dataset <dataset_type>
 
-#Install requirements  
-
-pip install -r requirements.txt
