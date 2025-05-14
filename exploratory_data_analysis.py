@@ -11,6 +11,12 @@ from shapely.geometry import Point
 import click
 from data_preprocessing import load_multiple_dataframes
 
+from data_preprocessing import engineer_features
+
+
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+
 # Set plot styles
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set(style="whitegrid")
@@ -254,11 +260,6 @@ def plot_top_location_pairs_avg_trips(df, top_n=20, title='Top Location Pairs by
     Plot a barplot of the top N pickup-dropoff location pairs by average number of trips per day
     using a viridis color gradient based on the trip count values
     """
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import matplotlib.cm as cm
-    import seaborn as sns
-    import pandas as pd
     
     df = df.copy()
     if 'PULocationID' not in df.columns or 'DOLocationID' not in df.columns:
@@ -550,6 +551,10 @@ def main(raw_data_path, dataset, months, sample_size):
     
     # Run EDA
     run_eda(df)
+
+    #RUN EDA after FE
+    df_fe = engineer_features(df)
+    run_eda(df_fe)
 
 if __name__ == '__main__':
     main()

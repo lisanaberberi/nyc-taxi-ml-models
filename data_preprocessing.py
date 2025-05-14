@@ -98,7 +98,7 @@ def prepare_dictionaries(df: pd.DataFrame):
     - df (pd.DataFrame): Input dataframe
     
     Returns:
-    - List of dictionaries with features
+    - List of dictionaries with minimial feature
     """
     df = df.copy()
 
@@ -113,7 +113,17 @@ def prepare_dictionaries(df: pd.DataFrame):
 
 def preprocess(df: pd.DataFrame, dv: DictVectorizer, fit_dv: bool = False):
     """
-    Preprocess the dataframe using DictVectorizer from prepare_dictionaries()
+    Preprocess the dataframe using DictVectorizer
+    
+    Args:
+    - df (pd.DataFrame): Input dataframe
+    - dv (DictVectorizer): The vectorizer
+    - fit_dv (bool): Whether to fit the vectorizer or just transform
+    - features (list): Features to include in preprocessing
+    
+    Returns:
+    - Transformed feature matrix
+    - The DictVectorizer
     """
     dicts = prepare_dictionaries(df)
     
@@ -122,22 +132,41 @@ def preprocess(df: pd.DataFrame, dv: DictVectorizer, fit_dv: bool = False):
     else:
         X = dv.transform(dicts)
     
-    return X, dv 
+    return X, dv
+
+
+# def preprocess_custom_features(df):
+#     categorical_features = ['PU_DO', 'pickup_day', 'pickup_month' ,'time_of_day']
+#     numerical_features = ['trip_distance']
+#     all_features = categorical_features + numerical_features
+#     dicts = df[all_features].to_dict(orient='records')
+#     return dicts
+
 
 @click.command()
 @click.option(
     "--raw_data_path",
-    help="Location where the NYC taxi trip data was saved"
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to directory containing raw parquet files"
 )
 @click.option(
     "--dest_path",
-    help="Location where the resulting files will be saved"
+    required=True,
+    type=click.Path(),
+    help="Path to save processed data"
 )
 @click.option(
     "--dataset",
     default="green",
-    help="Type of taxi dataset (green/yellow)"
+    type=click.Choice(['green', 'yellow'], case_sensitive=False),
+    help="Type of taxi dataset"
 )
+def run_data_prep_cli(raw_data_path: str, dest_path: str, dataset: str) -> None:
+    """Click command wrapper for data preparation."""
+    run_data_prep(raw_data_path, dest_path, dataset)
+
+
 def run_data_prep(raw_data_path: str, dest_path: str, dataset: str):
     """
     Prepare data for machine learning model
