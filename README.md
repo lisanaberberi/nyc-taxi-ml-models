@@ -4,7 +4,7 @@ This project builds and tracks machine learning models to predict taxi trip dura
 
 
 ## 📦 Project Structure
-
+``` 
 ├── data_preprocessing.py # Data cleaning & feature engineering utilities
 ├── model_training.py # Train baseline & feature-engineered models
 ├── utils.py # Utility functions (metrics & parameter logging)
@@ -12,6 +12,7 @@ This project builds and tracks machine learning models to predict taxi trip dura
 ├── data/ # Data directory (green taxi parquet files)
 ├── exploratory_data_analysis/ # Code to analyse the dataframe
 └── README.md # Project documentation
+``` 
 
 
 ### 🏗️ Model Training
