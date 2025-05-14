@@ -21,7 +21,7 @@ Two workflows:
 
 1. **Baseline Models** (minimal features)
    - Random Forest
-   - XGBoost
+   - LightGBM
    - Decision Tree
    - Gradient Boosting  
    → Trained on original features like pickup/dropoff location and trip distance.
