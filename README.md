@@ -56,5 +56,5 @@ Run the main script with the following command:
 #First install requirements 
 pip install -r requirements.txt
 
-python main.py --raw_data_path <path_to_raw_data> --dest_path <path_to_save_results> --dataset <dataset_type>
+python main.py --raw_data_path=<data_path> --dest_path=<destination_path> 
 
