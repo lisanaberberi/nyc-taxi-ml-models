@@ -14,6 +14,8 @@ from sklearn.tree import DecisionTreeRegressor
 from lightgbm import LGBMRegressor
 import pandas as pd
 
+import numpy as np
+
 def setup_mlflow_tracking(
     tracking_uri="http://localhost:5000", 
     experiment_name="green-taxi-duration-mlmodels-evaluations",
@@ -53,6 +55,7 @@ def log_model_metrics(y_true, y_pred, model_name, params=None, results_file="res
     mae = mean_absolute_error(y_true, y_pred)
     r2 = r2_score(y_true, y_pred)
     mape = mean_absolute_percentage_error(y_true, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     
     # Log parameters if provided
     if params:
@@ -63,7 +66,8 @@ def log_model_metrics(y_true, y_pred, model_name, params=None, results_file="res
         'mse': mse,
         'mae': mae,
         'r2': r2,
-        'mape': mape
+        'mape': mape,
+        'rmse': rmse
     })
     
     # Print metrics
@@ -72,6 +76,7 @@ def log_model_metrics(y_true, y_pred, model_name, params=None, results_file="res
     print(f"MAE: {mae}")
     print(f"R²: {r2}")
     print(f"MAPE: {mape}")
+    print(f"RMSE: {rmse}")
 
 
     # Get current run info
@@ -87,7 +92,9 @@ def log_model_metrics(y_true, y_pred, model_name, params=None, results_file="res
         'mse': mse,
         'mae': mae,
         'r2': r2,
-        'mape': mape
+        'mape': mape,
+        'rmse': rmse
+        
     }
 
     # Append to CSV (create if doesn't exist)

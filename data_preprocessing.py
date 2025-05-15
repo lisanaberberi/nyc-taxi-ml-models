@@ -54,9 +54,23 @@ def load_multiple_dataframes(raw_data_path: str, dataset: str, months: list):
     
     return pd.concat(dataframes, ignore_index=True)
 
+def get_time_of_day(hour):
+    if 5 <= hour < 12:
+        return 'morning'
+    elif 12 <= hour < 17:
+        return 'afternoon'
+    elif 17 <= hour < 21:
+        return 'evening'
+    elif 21 <= hour <= 23 or 0 <= hour < 5:
+        return 'night'
+    else:
+        return 'unknown'
+
+from pandas.api.types import CategoricalDtype
+
 def engineer_features(df: pd.DataFrame):
     """
-    Create additional features from the raw data
+    Create additional features from the raw data with defined categorical levels
     
     Args:
     - df (pd.DataFrame): Input dataframe
@@ -64,7 +78,6 @@ def engineer_features(df: pd.DataFrame):
     Returns:
     - pd.DataFrame: Dataframe with engineered features
     """
-    # Create a copy to avoid modifying the original
     df = df.copy()
     
     # Temporal Features
@@ -76,19 +89,51 @@ def engineer_features(df: pd.DataFrame):
     # Spatial Features
     df['PU_DO'] = df['PULocationID'].astype(str) + '_' + df['DOLocationID'].astype(str)
     
-    # Time-based Features
-    df['time_of_day'] = pd.cut(
-        df['pickup_hour'], 
-        bins=[0, 6, 12, 18, 24], 
-        labels=['night', 'morning', 'afternoon', 'evening']
-    )
-    
-    # Categorical Encoding
-    categorical_features = ['PULocationID', 'DOLocationID', 'PU_DO', 'time_of_day']
+    # Time of Day
+    df['time_of_day'] = df['pickup_hour'].apply(get_time_of_day)
+
+        # Categorical Encoding
+    categorical_features = ['PULocationID', 'DOLocationID', 'PU_DO', 'time_of_day', 'pickup_day']
     for feature in categorical_features:
         df[feature] = df[feature].astype('category')
     
+    # Define categories explicitly
+    # time_of_day_type = CategoricalDtype(categories=['night', 'morning', 'afternoon', 'evening'], ordered=True)
+
+    # # Example: known PULocationIDs, DOLocationIDs, or PU_DO combos
+    # # For simplicity assuming string types — you might build this dynamically from training data at train-time
+    # pu_location_type = CategoricalDtype(categories=[str(i) for i in range(1, 266)], ordered=False)
+    # do_location_type = CategoricalDtype(categories=[str(i) for i in range(1, 266)], ordered=False)
+    # pu_do_type = CategoricalDtype(categories=[], ordered=False)  # if you know possible combos, list them here
+
+    # # Cast to defined categorical types
+    # df['PULocationID'] = df['PULocationID'].astype(str).astype(pu_location_type)
+    # df['DOLocationID'] = df['DOLocationID'].astype(str).astype(do_location_type)
+    # df['PU_DO'] = df['PU_DO'].astype(pu_do_type)
+    # df['time_of_day'] = df['time_of_day'].astype(time_of_day_type)
+    
     return df
+
+# def prepare_dictionaries(df: pd.DataFrame):
+#     """
+#     Prepare feature dictionaries for models
+    
+#     Args:
+#     - df (pd.DataFrame): Input dataframe
+    
+#     Returns:
+#     - List of dictionaries with minimial feature
+#     """
+#     df = df.copy()
+
+#      # Remove the target if present
+#     df = df.drop(columns=['duration'], errors='ignore')
+
+#     df['PU_DO'] = df['PULocationID'].astype(str) + '_' + df['DOLocationID'].astype(str)
+#     categorical = ['PU_DO']
+#     numerical = ['trip_distance']
+#     dicts = df[categorical + numerical].to_dict(orient='records')
+#     return dicts
 
 def prepare_dictionaries(df: pd.DataFrame):
     """
@@ -98,41 +143,34 @@ def prepare_dictionaries(df: pd.DataFrame):
     - df (pd.DataFrame): Input dataframe
     
     Returns:
-    - List of dictionaries with minimial feature
+    - List of dictionaries with minimal features (PU_DO and trip_distance)
+    - Dataframe with PU_DO feature added, keeping all other columns
     """
     df = df.copy()
 
-     # Remove the target if present
-    df = df.drop(columns=['duration'], errors='ignore')
+    # Remove the target if present from the dicts, but keep it in the DataFrame
+    dict_df = df.drop(columns=['duration'], errors='ignore')
 
+    # Add PU_DO feature to both
     df['PU_DO'] = df['PULocationID'].astype(str) + '_' + df['DOLocationID'].astype(str)
+    dict_df['PU_DO'] = df['PU_DO']
+
+    # Prepare minimal feature dicts
     categorical = ['PU_DO']
     numerical = ['trip_distance']
-    dicts = df[categorical + numerical].to_dict(orient='records')
-    return dicts
+    dicts = dict_df[categorical + numerical].to_dict(orient='records')
+
+    return dicts, df
+
 
 def preprocess(df: pd.DataFrame, dv: DictVectorizer, fit_dv: bool = False):
-    """
-    Preprocess the dataframe using DictVectorizer
-    
-    Args:
-    - df (pd.DataFrame): Input dataframe
-    - dv (DictVectorizer): The vectorizer
-    - fit_dv (bool): Whether to fit the vectorizer or just transform
-    - features (list): Features to include in preprocessing
-    
-    Returns:
-    - Transformed feature matrix
-    - The DictVectorizer
-    """
-    dicts = prepare_dictionaries(df)
-    
+    dicts, _ = prepare_dictionaries(df)  # ignore updated df if you don't need it here
     if fit_dv:
         X = dv.fit_transform(dicts)
     else:
         X = dv.transform(dicts)
-    
     return X, dv
+
 
 
 # def preprocess_custom_features(df):
