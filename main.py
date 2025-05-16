@@ -93,25 +93,6 @@ def main(
         # Check for remaining null values
         df_null = df_train.isnull().sum().sort_values(ascending=False)
         logger.info(f"Remaining NULL values:\n{df_null}")
-        
-        # Apply enhanced feature engineering
-        feature_eng_train_data = engineer_features_improved(df_train)
-        feature_eng_test_data = engineer_features_improved(df_test)
-        
-        # Check for null values after feature engineering
-        df_fe_null = feature_eng_train_data.isnull().sum().sort_values(ascending=False)
-        logger.info(f"NULL values after feature engineering:\n{df_fe_null}")
-
-        # # Create PU_DO in train_data and test_data (make sure test_data also has PU_DO)
-        # train_data['PU_DO'] = train_data['PULocationID'].astype(str) + '_' + train_data['DOLocationID'].astype(str)
-        # test_data['PU_DO'] = test_data['PULocationID'].astype(str) + '_' + test_data['DOLocationID'].astype(str)
-
-        # Filter to trips under 6 miles (as they are more frequent)
-        # train_data = train_data[train_data['trip_distance'] < 6]
-        # test_data = test_data[test_data['trip_distance'] < 6]
-
-        logger.info(f"Train data shape after trip_distance filtering: {feature_eng_train_data.shape}")
-        logger.info(f"Test data shape after trip_distance filtering: {feature_eng_test_data.shape}")
 
         # top_pairs = ['74_75', '74_236', '75_74', '74-166']  # your actual top N
 
@@ -121,22 +102,26 @@ def main(
 
         
 
-        # Train models on raw data (with min feature selection: PU_DO9(cat)+ trip_distance(num))
-        #multiple_models = train_models(train_data, test_data)
+        # Train baseline models on raw data (with min feature selection: PU_DO9(cat)+ trip_distance(num))
+        multiple_models = train_models(train_data, test_data)
         logger.info(f"Engineered Train Data preview:\n{feature_eng_train_data.head(10)}")
 
-        #check for null values after feature engineering
-        print("CHECK NULL VALUES")
-        df_fe_null=  feature_eng_train_data.isnull().sum().sort_values(ascending=False)
-        logger.info(f"NULL VALUES preview:\n{df_fe_null}")
+        # Apply enhanced feature engineering
+        feature_eng_train_data = engineer_features_improved(df_train)
+        feature_eng_test_data = engineer_features_improved(df_test)
         
-    
+        # Check for null values after feature engineering
+        df_fe_null = feature_eng_train_data.isnull().sum().sort_values(ascending=False)
+        logger.info(f"NULL values after feature engineering:\n{df_fe_null}")
 
-# def main(
-#     raw_data_path: str,
-#     
+
+        logger.info(f"Train data shape after trip_distance filtering: {feature_eng_train_data.shape}")
+        logger.info(f"Test data shape after trip_distance filtering: {feature_eng_test_data.shape}")
+        
+
         # Ends the previous active run
         # mlflow.end_run()
+
         # Create a dictionary to store the trained custom models
         custom_models = {}
         
