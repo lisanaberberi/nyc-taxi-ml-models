@@ -103,7 +103,7 @@ def main(
         
 
         # Train baseline models on raw data (with min feature selection: PU_DO9(cat)+ trip_distance(num))
-        multiple_models = train_models(train_data, test_data)
+        multiple_models = train_models(df_train, df_test)
         logger.info(f"Engineered Train Data preview:\n{feature_eng_train_data.head(10)}")
 
         # Apply enhanced feature engineering
