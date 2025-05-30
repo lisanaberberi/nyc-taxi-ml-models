@@ -1,9 +1,9 @@
-# 🚖 NYC Green Taxi Trip Duration Prediction
+#  NYC Green Taxi Trip Duration Prediction
 
 This project builds and tracks machine learning models to predict taxi trip durations using New York City's green taxi trip records. It includes feature engineering, model training with various regressors, and MLflow tracking for experiment management.
 
 
-## 📦 Project Structure
+##  Project Structure
 ``` 
 ├── data_preprocessing.py # Data cleaning & feature engineering utilities
 ├── model_training.py # Train baseline & feature-engineered models
@@ -15,7 +15,7 @@ This project builds and tracks machine learning models to predict taxi trip dura
 ``` 
 
 
-### 🏗️ Model Training
+###  Model Training
 
 Two workflows:
 
@@ -56,5 +56,8 @@ Run the main script with the following command:
 #First install requirements 
 pip install -r requirements.txt
 
-python main.py --raw_data_path=<data_path> --dest_path=<destination_path> 
+python main.py --raw_data_path=<input_data_path> --dest_path=<destination_path> 
+
+#first load all the data from your input dir
+python data_preprocessing.py   --raw_data_path=<input_data_path> --dest_path=<destination_path>    --dataset=green   --taxi_zones_path=data/taxi_zones/taxi_zones.shp
 
