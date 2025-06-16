@@ -6,8 +6,8 @@ from model_training import (
     train_custom_model, 
     predict_trip_duration, 
     evaluate_features_fast,  # Updated function name
-    optimize_hyperparameters,
-    run_optimization_workflow
+   # optimize_hyperparameters,
+   # run_optimization_workflow
 )
 import mlflow
 from datetime import datetime
@@ -179,49 +179,7 @@ def main(
                     test_data=df_fe_test
                     )
             
-            # Define model types to train
-            # model_types = ['random_forest', 'gradient_boosting', 'decision_tree', 'lightgbm']
-            
-            # # Train each model type
-            # for model_type in model_types:
-            #     logger.info(f"Training {model_type}...")
-            #     try:
-            #         custom_models[model_type] = train_custom_model(
-            #             train_data=df_fe_train,
-            #             test_data=df_fe_test,
-            #             model_type=model_type
-            #         )
-            #         logger.info(f"{model_type} training completed successfully")
-            #     except Exception as e:
-            #         logger.error(f"Error training {model_type}: {str(e)}")
-            #         continue
-            
         logger.info(f"Custom models training completed. Trained {len(custom_models)} models.")
-        
-        # Run hyperparameter optimization if requested
-        optimization_results = {}
-        if run_optimization:
-            logger.info("Starting hyperparameter optimization...")
-            
-            # Define models to optimize (subset for efficiency)
-            models_to_optimize = ['random_forest', 'lightgbm']
-            
-            try:
-                optimization_results = run_optimization_workflow(
-                    train_data=df_fe_train,
-                    test_data=df_fe_test,
-                    target='duration',
-                    model_types=models_to_optimize,
-                    n_trials=n_trials
-                )
-                
-                logger.info("Hyperparameter optimization completed")
-                for model_type, result in optimization_results.items():
-                    logger.info(f"{model_type} - Best RMSE: {result['best_score']:.4f}")
-                    logger.info(f"{model_type} - Best params: {result['best_params']}")
-                    
-            except Exception as e:
-                logger.error(f"Error during optimization: {str(e)}")
         
         # Demonstration: Make predictions using trained models
         if custom_models:
@@ -245,13 +203,8 @@ def main(
         logger.info(f"Data processed: {df_train.shape[0]} training samples, {df_test.shape[0]} test samples")
         logger.info(f"Baseline models trained: {'Yes' if run_baseline else 'No'}")
         logger.info(f"Custom models trained: {len(custom_models) if custom_models else 0}")
-        logger.info(f"Hyperparameter optimization: {'Yes' if run_optimization else 'No'}")
         logger.info(f"Feature evaluation: {'Yes' if evaluate_features else 'No'}")
         
-        if optimization_results:
-            logger.info("\nBest optimization results:")
-            for model_type, result in optimization_results.items():
-                logger.info(f"  {model_type}: RMSE = {result['best_score']:.4f}")
         
         logger.info("Pipeline completed successfully!")
         

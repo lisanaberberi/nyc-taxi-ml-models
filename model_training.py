@@ -10,16 +10,15 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.pipeline import make_pipeline, Pipeline
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score
 
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.impute import SimpleImputer
 
 from utils import log_model_metrics
-from data_preprocessing import engineer_features, prepare_dictionaries
+from data_preprocessing import feature_eng
 
 from mlflow.models import infer_signature
-
 from utils import log_model_parameters
 
 import matplotlib.pyplot as plt
@@ -27,261 +26,290 @@ import os
 import seaborn as sns
 
 import logging
+import optuna
+from optuna.integration.mlflow import MLflowCallback
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 # Generate run datetime
 run_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
+def get_model_config():
+    return {
+        'random_forest': RandomForestRegressor(
+            n_estimators=100,
+            max_depth=15,
+            min_samples_leaf=5,
+            bootstrap=True,
+            n_jobs=-1,
+            random_state=42
+        ),
+        'lightgbm': LGBMRegressor(
+            n_estimators=100,
+            max_depth=8,
+            learning_rate=0.1,
+            min_child_samples=20,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            verbose=-1
+        ),
+        'decision_tree': DecisionTreeRegressor(
+            max_depth=15,
+            min_samples_leaf=10,
+            random_state=42
+        ),
+        'gradient_boosting': GradientBoostingRegressor(
+            n_estimators=100,
+            max_depth=6,
+            learning_rate=0.1,
+            min_samples_leaf=10,
+            subsample=0.8,
+            random_state=42
+        )
+    }
+
+
 def train_models(train_data, test_data, target='duration'):
     """
-    Train baseline models with only basic feature using MLflow tracking.
+    Train baseline models with only basic features using MLflow tracking.
+    Optimized for faster execution.
     """
-    y_train = train_data[target].values
-    y_test = test_data[target].values
-
     # Baseline: minimal features
     y_train = train_data[target].values
     y_test = test_data[target].values
 
-    # Prepare basic feature dicts
-    # train_dicts = prepare_dictionaries(train_data)
-    # test_dicts = prepare_dictionaries(test_data)
+    # Columns to drop that cause issues for DictVectorizer (timestamps)
+    columns_to_drop = ['lpep_pickup_datetime', 'lpep_dropoff_datetime']
 
-    train_dicts, train_data = prepare_dictionaries(train_data)
-    test_dicts, test_data = prepare_dictionaries(test_data)
+    # Drop target and datetime columns
+    train_df = train_data.drop(columns=[target] + columns_to_drop, errors='ignore')
+    test_df = test_data.drop(columns=[target] + columns_to_drop, errors='ignore')
 
+    # Fill missing values (example: with 0)
+    train_df = train_df.fillna(0)
+    test_df = test_df.fillna(0)
 
+    # Convert to dicts excluding target
+    train_dicts = train_df.to_dict(orient='records')
+    test_dicts = test_df.to_dict(orient='records')
 
-    # Vectorize
+    print(f"Train dicts length: {len(train_dicts)}")
+    print(f"Test dicts length: {len(test_dicts)}")
+
+    if len(train_dicts) == 0 or len(test_dicts) == 0:
+        raise ValueError("Training or testing data is empty after processing.")
+
+    # Vectorize once for all models
     dv = DictVectorizer()
     X_train = dv.fit_transform(train_dicts)
-
     X_test = dv.transform(test_dicts)
-    models = {
-        'random_forest': RandomForestRegressor(
-            n_estimators=300,          # More trees to stabilize variance
-            max_depth=25,              # Slightly deeper since small-ish dataset
-            min_samples_leaf=5,        # Lower to allow a bit more granularity
-            max_features='sqrt',       # Classic best practice for RF
-            bootstrap=True,
-            n_jobs=-1,                 # Parallelize
-            random_state=42
-        ),
-        'lightgbm': LGBMRegressor(
-            n_estimators=500,          # Boosting benefits from more iterations
-            max_depth=8,               # Slightly deeper trees (as data is small)
-            learning_rate=0.05,        # Lower LR with more trees for stability
-            min_child_samples=10,      # Less conservative
-            subsample=0.9,             # Use more data per boosting round
-            colsample_bytree=0.8,
-            random_state=42
-        ),
-        'decision_tree': DecisionTreeRegressor(
-            max_depth=18,              # Can afford deeper single trees
-            min_samples_leaf=5,        # Finer granularity
-            random_state=42
-        ),
-        'gradient_boosting': GradientBoostingRegressor(
-            n_estimators=300,          # More boosting rounds
-            max_depth=6,               # Slightly deeper to reduce bias
-            learning_rate=0.05,        # Lower LR for smoother learning
-            min_samples_leaf=5,
-            subsample=0.9,             # Slightly higher subsampling
-            random_state=42
-        )
-    }
 
+    models = get_model_config()
+
+    # store the best metric value  of r2 among the models
+    best_r2 = -float('inf')
+    best_model_name = None
+
+    # Use single parent run instead of nested runs for better performance
     with mlflow.start_run(run_name=f"baseline_models_{run_datetime}") as parent_run:
         results = {}
+        
+        # Log dataset info once at parent level (smaller sample for efficiency)
+        train_data = train_data.drop(columns='duration')
+        sample_data = train_data.sample(n=min(1000, len(train_data)), random_state=42)
+        mlflow.log_input(
+            mlflow.data.from_pandas(sample_data, source="training_sample"), 
+            context="training"
+        )
 
         for model_name, model in models.items():
-            run_name = f"baseline_{model_name}_{run_datetime}"
-            with mlflow.start_run(nested=True, run_name=run_name):
-                pipeline = make_pipeline(dv, model)
+            logger.info(f"Training {model_name}...")
+            
+            # Train model
+            pipeline = make_pipeline(dv, model)
+            pipeline.fit(train_dicts, y_train)
+            preds = pipeline.predict(test_dicts)
 
-                pipeline.fit(train_dicts, y_train)
-                preds = pipeline.predict(test_dicts)
+            # Log metrics with model prefix
+            # metrics = {
+            #     f"{model_name}_mae": mean_absolute_error(y_test, preds),
+            #     f"{model_name}_mse": mean_squared_error(y_test, preds),
+            #     f"{model_name}_rmse": np.sqrt(mean_squared_error(y_test, preds)),
+            #     f"{model_name}_r2": r2_score(y_test, preds)
+            # }
+            # mlflow.log_metrics(metrics)
+            log_model_parameters(model, f"baseline_{model_name}")
+            log_model_metrics(y_test, preds, f"baseline_{model_name}")
 
-                # Log params and metrics
-                log_model_parameters(model, f"baseline_{model_name}")
-                log_model_metrics(y_test, preds, f"baseline_{model_name}")
+            # Plot the predictions against the ground_truth
+            log_prediction_plot(y_test, preds, f"baseline_{model_name}")
+            
+            # Compute R² to track best model            
+            current_r2 = r2_score(y_test, preds)
+            if current_r2 > best_r2:
+                best_r2 = current_r2
+                best_model_name = model_name
 
-                mlflow.log_input(mlflow.data.from_pandas(train_data, source="file:///data/green_tripdata_2024-07.parquet"), context="training")
+           # # Log model parameters with prefix
+            # model_params = model.get_params()
+            # prefixed_params = {f"{model_name}_{k}": v for k, v in model_params.items()}
+            # mlflow.log_params(prefixed_params)
 
-                signature = infer_signature(X_train, preds[:5])
-                input_example = X_train[:5]
+            # Create signature and log model
+            signature = infer_signature(X_train, preds[:5])
+            
+            mlflow.sklearn.log_model(
+                sk_model=pipeline,
+                artifact_path=f"baseline_{model_name}_model",
+                signature=signature
+            )
 
-                mlflow.sklearn.log_model(
-                    sk_model=pipeline,
-                    artifact_path=f"baseline_{model_name}_model",
-                    input_example=input_example,
-                    signature=signature
-                )
+            # Log prediction plot (optimized)
+            log_prediction_plot(y_test, preds, f"baseline_{model_name}", sample_size=500)
+            
+            # Log best R² and best model at the end of training
+            mlflow.log_metric("best_r2", best_r2)
+            mlflow.set_tag("best_model", best_model_name)
 
-                # Plot the predictions against the ground_truth
-                log_prediction_plot(y_test, preds, f"baseline_{model_name}")
 
-                results[model_name] = {'model': pipeline, 'y_pred': preds}
+            results[model_name] = {'model': pipeline, 'y_pred': preds}
 
         return results
 
-
-
-def train_custom_model(train_data, test_data, target='duration', model_type='random_forest'):
+def train_custom_model(train_data, test_data, target='duration'):
     """
-    Train a specific type of custom model on engineered features using MLflow tracking.
+    Train custom models with engineered features using MLflow tracking.
+    Optimized for performance and consistent with baseline train_models style.
     """
-
     y_train = train_data[target].values
     y_test = test_data[target].values
 
-    # Model configs
-    models = {
-        'random_forest': RandomForestRegressor(
-            n_estimators=100,          # More trees to stabilize variance
-            max_depth=20,              # Slightly deeper since small-ish dataset
-            min_samples_leaf=10,        # Lower to allow a bit more granularity
-            #max_features='sqrt',       # Classic best practice for RF
-            bootstrap=True,
-            n_jobs=-1,                 # Parallelize
-            random_state=42
-        ),
-        'lightgbm': LGBMRegressor(
-            n_estimators=500,          # Boosting benefits from more iterations
-            max_depth=8,               # Slightly deeper trees (as data is small)
-            learning_rate=0.05,        # Lower LR with more trees for stability
-            min_child_samples=10,      # Less conservative
-            subsample=0.9,             # Use more data per boosting round
-            colsample_bytree=0.8,
-            random_state=42
-        ),
-        'decision_tree': DecisionTreeRegressor(
-            max_depth=18,              # Can afford deeper single trees
-            min_samples_leaf=5,        # Finer granularity
-            random_state=42
-        ),
-        'gradient_boosting': GradientBoostingRegressor(
-            n_estimators=300,          # More boosting rounds
-            max_depth=6,               # Slightly deeper to reduce bias
-            learning_rate=0.05,        # Lower LR for smoother learning
-            min_samples_leaf=5,
-            subsample=0.9,             # Slightly higher subsampling
-            random_state=42
-        )
-    }
-    model = models[model_type]
-    run_name = f"{model_type}_custom_model_{run_datetime}"
+    #numerical_columns = ['fare_amount', 'total_amount', 'trip_distance']
+    numerical_columns = ['fare_amount', 'total_amount',]
+    # categorical_columns = ['PULocationID', 'DOLocationID', 
+    #                       'time_of_day', 'pickup_day', 'PU_DO']
+    categorical_columns = ['PULocationID', 'time_of_day', 'pickup_day']
 
-    # Define your feature lists
-    #categorical_columns = ['PULocationID', 'DOLocationID', 'time_of_day', 'pickup_day']
-    numerical_columns = ['trip_distance', 'pickup_hour']
+    columns_taxi_zone = ['pickup_borough', 'drop_zone', 'drop_borough']
+    columns_to_keep = numerical_columns + categorical_columns + columns_taxi_zone
 
-    categorical_columns = ['PULocationID', 'DOLocationID', 'PU_DO_grouped', 
-                           'time_of_day', 'pickup_day']
+    # Filter columns for train/test
+    train_df = train_data[columns_to_keep].copy()
+    test_df = test_data[columns_to_keep].copy()
 
-    # Prepare tags dictionary
-    tags = {f"categorical_{col}": col for col in categorical_columns}
-    tags.update({f"numerical_{col}": col for col in numerical_columns})
+    # Preprocessing pipeline (numerical + categorical)
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', Pipeline([
+                ('imputer', SimpleImputer(strategy='median')),
+                ('scaler', StandardScaler())
+            ]), numerical_columns),
 
+            ('cat', Pipeline([
+                ('imputer', SimpleImputer(strategy='most_frequent', fill_value='unknown')),
+                ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+            ]), categorical_columns)
+        ],
+        remainder='drop'
+    )
+
+    models = get_model_config()
+
+    best_r2 = -float('inf')
+    best_model_name = None
     results = {}
 
-    with mlflow.start_run(nested=True, run_name=run_name) as run:
-        mlflow.set_tags(tags)
+    with mlflow.start_run(run_name=f"custom_models_{run_datetime}") as parent_run:
+        # Log sample of training data (without target)
+        sample_data = train_data[columns_to_keep].sample(n=min(1000, len(train_data)), random_state=42)
+        mlflow.log_input(mlflow.data.from_pandas(sample_data, source="training_sample"), context="training")
 
-        # Column Transformer for preprocessing
-        # preprocessor = ColumnTransformer(
-        #     transformers=[
-        #         ('num', Pipeline(steps=[
-        #             ('imputer', SimpleImputer(strategy='mean')),
-        #             ('scaler', StandardScaler())
-        #         ]), numerical_columns),
+        # Log general tags
+        mlflow.set_tags({
+            "feature_engineering": "custom",
+            "numerical_features": ",".join(numerical_columns),
+            "categorical_features": ",".join(categorical_columns),
+        })
 
-        #         ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_columns)
-        #     ]
-        # )
+        for model_name, model in models.items():
+            logger.info(f"Training {model_name} with custom features...")
 
-        # Improved preprocessing with better handling of categorical features
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ('num', Pipeline(steps=[
-                    ('imputer', SimpleImputer(strategy='median')),  # Median is more robust to outliers
-                    ('scaler', StandardScaler())
-                ]), numerical_columns),
-                
-                # Use OneHotEncoder with handle_unknown='ignore' for robustness
-                ('cat', Pipeline(steps=[
-                    ('imputer', SimpleImputer(strategy='most_frequent')),  # Handle missing categoricals
-                    ('encoder', OneHotEncoder(handle_unknown='ignore'))
-                ]), categorical_columns)
-            ],
-            remainder='drop'  # Drop columns not specified in transformers
-        )
+            # Create pipeline with preprocessor and model
+            pipeline = Pipeline([
+                ('preprocessor', preprocessor),
+                ('model', model)
+            ])
 
-        # Complete pipeline
-        pipeline = Pipeline(steps=[
-            ('preprocessor', preprocessor),
-            ('model', model)
-        ])
+            # Train
+            pipeline.fit(train_df, y_train)
+            preds = pipeline.predict(test_df)
 
-        # Train model
-        pipeline.fit(train_data, y_train)
-        preds = pipeline.predict(test_data)
+            # Log params, metrics, plots with prefix
+            log_model_parameters(model, f"custom_{model_name}")
+            log_model_metrics(y_test, preds, f"custom_{model_name}")
+            log_prediction_plot(y_test, preds, f"custom_{model_name}")
 
-        # Log model params & metrics
-        log_model_parameters(model, f"{model_type}_custom")
-        log_model_metrics(y_test, preds, f"{model_type}_custom")
+            # Check best R²
+            current_r2 = r2_score(y_test, preds)
+            if current_r2 > best_r2:
+                best_r2 = current_r2
+                best_model_name = model_name
 
-        # Log training data as input artifact
-        mlflow.log_input(mlflow.data.from_pandas(train_data), context="training")
+            # Signature and model logging
+            signature = infer_signature(train_df, preds[:5])
+            mlflow.sklearn.log_model(
+                sk_model=pipeline,
+                artifact_path=f"custom_{model_name}_model",
+                signature=signature
+            )
 
-        # Create MLflow model signature
-        signature = infer_signature(train_data, preds[:5])
-        input_example = train_data.head(5)
+            results[model_name] = {'model': pipeline, 'y_pred': preds}
+            # After training all models, log best model info once 
+            mlflow.log_metric("best_r2", best_r2)
+            mlflow.set_tag("best_model", best_model_name)
 
-        mlflow.sklearn.log_model(
-            pipeline,
-            f"{model_type}_custom_model",
-            input_example=input_example,
-            signature=signature
-        )
-
-        #PLot the predictions against the ground_truth
-        log_prediction_plot(y_test, preds, f"{model_type}_custom")
-
-
-        results[model_type] = {'model': pipeline, 'y_pred': preds}
-
-    return results[model_type]
+    return results
 
 
 def predict_trip_duration(results, model_type, input_data, feature_engineering=False):
-    """
-    Predict trip duration with optional feature engineering
-    """
-    # Retrieve the trained model from the results dictionary
-    model = results[model_type]['model']
+    model_info = results[model_type]
+    
+    # Support both dict with 'model' key or direct pipeline
+    if isinstance(model_info, dict) and 'model' in model_info:
+        model = model_info['model']
+    else:
+        model = model_info  # assume it's the pipeline itself
     
     if feature_engineering:
-        input_data = engineer_features_improved(input_data)
+        input_data = feature_eng(input_data)
         features = [
             'PULocationID', 'DOLocationID', 'PU_DO_grouped', 
-            'time_of_day', 'pickup_day','pickup_month', 'is_weekend', 'pickup_hour'
-
+            'time_of_day', 'pickup_day','pickup_month', 'pickup_hour',
+            'fare_amount', 'total_amount',  'trip_distance', 'PU_DO'
         ]
-        input_data = input_data[features]
+        available_features = [f for f in features if f in input_data.columns]
+        input_data = input_data[available_features]
     
     return model.predict(input_data)
 
-def log_prediction_plot(y_true, y_pred, model_name, sample_size=1000):
-    # Filter data for trips between 0-20 minutes
-    mask = (np.array(y_true) <= 20) & (np.array(y_true) >= 0)
-    y_true_filtered = np.array(y_true)[mask]
-    y_pred_filtered = np.array(y_pred)[mask]
+def log_prediction_plot(y_true, y_pred, model_name, sample_size=10000):
+    """
+    Optimized prediction plotting function
+    """
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    
+    # Calculate R² on full data first
+    r2_full = r2_score(y_true, y_pred)
+    
+    # Filter data for trips between 0-20 minutes AFTER scoring
+    mask = (y_true >= 0) & (y_true <= 20)
+    y_true_filtered = y_true[mask]
+    y_pred_filtered = y_pred[mask]
     
     # Sample from filtered data if needed
     if len(y_true_filtered) > sample_size:
@@ -292,151 +320,72 @@ def log_prediction_plot(y_true, y_pred, model_name, sample_size=1000):
         y_true_plot = y_true_filtered
         y_pred_plot = y_pred_filtered
     
-    # Set style
-    plt.style.use('seaborn-v0_8-whitegrid')
-    sns.set(style="whitegrid")
-    
-    # Scatter plot: predicted vs actual
+    # Create plot
     fig, ax = plt.subplots(figsize=(8, 6))
-    sns.scatterplot(x=y_true_plot, y=y_pred_plot, ax=ax, color="#A0C4FF", edgecolor="w", s=50)
     
-    # Set fixed axis limits for 0-20 minute range
+    ax.scatter(y_true_plot, y_pred_plot, alpha=0.6, s=20, color='#A0C4FF', edgecolors='white', linewidth=0.5)
     ax.set_xlim(0, 20)
     ax.set_ylim(0, 20)
+    ax.plot([0, 20], [0, 20], 'k--', lw=2, alpha=0.8)
+    ax.set_xlabel("Actual Duration (min)", fontsize=12)
+    ax.set_ylabel("Predicted Duration (min)", fontsize=12)
+    ax.set_title(f"{model_name} — Predicted vs Actual", fontsize=14)
+    ax.grid(True, alpha=0.3)
     
-    # Plot identity line
-    ax.plot([0, 20], [0, 20], 'k--', lw=2)
+    # Add R² on full data to plot
+    ax.text(0.05, 0.95, f'R² (full) = {r2_full:.3f}', transform=ax.transAxes, 
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
-    # Labels and title
-    ax.set_xlabel("Actual Duration (minutes)")
-    ax.set_ylabel("Predicted Duration (minutes)")
-    ax.set_title(f"{model_name} — Predicted vs Actual (0-20 min)")
-    
-    # Save plot
-    plot_path = f"{model_name}_0_20_scatter_plot.png"
+    # Save and log
+    plot_path = f"{model_name}_prediction_plot.png"
     fig.tight_layout()
-    fig.savefig(plot_path)
-    
-    # Log figure as artifact to MLflow
+    fig.savefig(plot_path, dpi=100, bbox_inches='tight')
     mlflow.log_artifact(plot_path)
-    
-    # Clean up plot file
     plt.close(fig)
-    os.remove(plot_path)
+    if os.path.exists(plot_path):
+        os.remove(plot_path)
 
 
-
-def engineer_features_improved(df: pd.DataFrame):
+def evaluate_features_fast(train_data, test_data, target='duration'):
     """
-    Enhanced feature engineering with more sophisticated features
+    Fast feature evaluation using correlation and single model approach
     """
-    df = df.copy()
-    
-    # Basic temporal features
-    df['pickup_hour'] = df['lpep_pickup_datetime'].dt.hour
-    df['pickup_day'] = df['lpep_pickup_datetime'].dt.day_name()
-    df['pickup_month'] = df['lpep_pickup_datetime'].dt.month
-    df['is_weekend'] = df['lpep_pickup_datetime'].dt.dayofweek.isin([5, 6]).astype(int)
-    
-    # More sophisticated time features
-    df['pickup_dayofweek'] = df['lpep_pickup_datetime'].dt.dayofweek
-    df['dropoff_hour'] = df['lpep_dropoff_datetime'].dt.hour
-    df['hour_diff'] = (df['dropoff_hour'] - df['pickup_hour']) % 24
-    
-    # Time of day as both category and cyclical features
-    df['time_of_day'] = df['pickup_hour'].apply(get_time_of_day)
-    
-    # Cyclical encoding of time (hours)
-    df['pickup_hour_sin'] = np.sin(2 * np.pi * df['pickup_hour']/24)
-    df['pickup_hour_cos'] = np.cos(2 * np.pi * df['pickup_hour']/24)
-    
-    # Location features
-    df['PU_DO'] = df['PULocationID'].astype(str) + '_' + df['DOLocationID'].astype(str)
-    
-    # Calculate pickup-dropoff frequency
-    pu_do_counts = df['PU_DO'].value_counts()
-    # Only keep the top N most frequent pairs, replace others with 'other'
-    top_n = 50  # Adjust based on your data
-    frequent_pairs = pu_do_counts.nlargest(top_n).index
-    df['PU_DO_grouped'] = df['PU_DO'].apply(lambda x: x if x in frequent_pairs else 'other')
-    
-    # Create individual PU and DO frequency features
-    pu_counts = df['PULocationID'].value_counts()
-    do_counts = df['DOLocationID'].value_counts()
-    df['PU_frequency'] = df['PULocationID'].map(pu_counts)
-    df['DO_frequency'] = df['DOLocationID'].map(do_counts)
-
-    
-    # Convert categorical features to appropriate type
-    # categorical_features = ['PULocationID', 'DOLocationID', 'PU_DO_grouped', 
-    #                        'time_of_day', 'pickup_day']
-    categorical_features = ['PULocationID', 'DOLocationID', 'PU_DO', 
-                           'time_of_day', 'pickup_day']
-    for feature in categorical_features:
-        if feature in df.columns:
-            df[feature] = df[feature].astype('category')
-    
-    return df
-
-def get_time_of_day(hour):
-    if 5 <= hour < 12:
-        return 'morning'
-    elif 12 <= hour < 17:
-        return 'afternoon'
-    elif 17 <= hour < 21:
-        return 'evening'
-    else:
-        return 'night'
-
-def evaluate_features(train_data, test_data, target='duration'):
-    """
-    Evaluate features individually to determine their predictive power
-    """
-    y_train = train_data[target].values
-    y_test = test_data[target].values
+    logger.info("Starting fast feature evaluation...")
     
     # Get all potential features
     all_features = [col for col in train_data.columns 
                    if col != target and col not in ['lpep_pickup_datetime', 'lpep_dropoff_datetime']]
-                   
-    feature_importance = {}
     
-    # Simple model to test each feature
-    for feature in all_features:
+    feature_scores = {}
+    
+    # Calculate correlation for numerical features
+    numerical_features = train_data.select_dtypes(include=[np.number]).columns.tolist()
+    if target in numerical_features:
+        numerical_features.remove(target)
+    
+    for feature in numerical_features:
+        if feature in all_features:
+            corr = abs(train_data[feature].corr(train_data[target]))
+            feature_scores[feature] = corr
+    
+    # For categorical features, use simple variance analysis
+    categorical_features = [f for f in all_features if f not in numerical_features]
+    
+    for feature in categorical_features:
         try:
-            X_train = train_data[[feature]].copy()
-            X_test = test_data[[feature]].copy()
-            
-            # Handle categorical features
-            if train_data[feature].dtype.name == 'category' or train_data[feature].dtype == 'object':
-                # For categorical features, use OneHotEncoder
-                encoder = OneHotEncoder(handle_unknown='ignore')
-                X_train_encoded = encoder.fit_transform(X_train)
-                X_test_encoded = encoder.transform(X_test)
-                
-                model = RandomForestRegressor(n_estimators=50, max_depth=5, random_state=42)
-                model.fit(X_train_encoded, y_train)
-                y_pred = model.predict(X_test_encoded)
-            else:
-                # For numerical features
-                # Handle potential NaNs
-                imputer = SimpleImputer(strategy='mean')
-                X_train_imputed = imputer.fit_transform(X_train)
-                X_test_imputed = imputer.transform(X_test)
-                
-                model = RandomForestRegressor(n_estimators=50, max_depth=5, random_state=42)
-                model.fit(X_train_imputed, y_train)
-                y_pred = model.predict(X_test_imputed)
-            
-            # Calculate R² score
-            r2 = r2_score(y_test, y_pred)
-            feature_importance[feature] = r2
-            
-        except Exception as e:
-            logger.warning(f"Error evaluating feature {feature}: {str(e)}")
-            feature_importance[feature] = 0
+            # Calculate coefficient of variation within groups
+            grouped_stats = train_data.groupby(feature)[target].agg(['mean', 'std'])
+            cv_mean = grouped_stats['std'].mean() / grouped_stats['mean'].mean()
+            feature_scores[feature] = cv_mean if not np.isnan(cv_mean) else 0
+        except:
+            feature_scores[feature] = 0
     
     # Sort features by importance
-    sorted_features = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
+    sorted_features = sorted(feature_scores.items(), key=lambda x: x[1], reverse=True)
+    
+    logger.info("Feature evaluation completed")
+    for feature, score in sorted_features[:10]:
+        logger.info(f"{feature}: {score:.4f}")
     
     return sorted_features
+
