@@ -76,6 +76,18 @@ run_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
     help="Run custom models training"
 )
 @click.option(
+    "--run_optimization",
+    is_flag=True,
+    default=False,
+    help="Run hyperparameter optimization"
+)
+@click.option(
+    "--n_trials",
+    default=50,
+    type=int,
+    help="Number of optimization trials for Optuna"
+)
+@click.option(
     "--evaluate_features",
     is_flag=True,
     default=False,
@@ -89,6 +101,8 @@ def main(
     feature_type: str,
     run_baseline: bool,
     run_custom: bool,
+    run_optimization: bool,
+    n_trials: int,
     evaluate_features: bool
 ) -> None:
     """Main execution pipeline with configurable training options."""
@@ -167,6 +181,31 @@ def main(
             
         logger.info(f"Custom models training completed. Trained {len(custom_models)} models.")
         
+        # Run hyperparameter optimization if requested
+        optimization_results = {}
+        if run_optimization:
+            logger.info("Starting hyperparameter optimization...")
+            
+            # Define models to optimize (subset for efficiency)
+            models_to_optimize = ['random_forest', 'lightgbm']
+            
+            try:
+                optimization_results = run_optimization_workflow(
+                    train_data=df_fe_train,
+                    test_data=df_fe_test,
+                    target='duration',
+                    model_types=models_to_optimize,
+                    n_trials=n_trials
+                )
+                
+                logger.info("Hyperparameter optimization completed")
+                for model_type, result in optimization_results.items():
+                    logger.info(f"{model_type} - Best RMSE: {result['best_score']:.4f}")
+                    logger.info(f"{model_type} - Best params: {result['best_params']}")
+                    
+            except Exception as e:
+                logger.error(f"Error during optimization: {str(e)}")
+        
         # Demonstration: Make predictions using trained models
         if custom_models:
             logger.info("Demonstrating predictions...")
@@ -189,8 +228,13 @@ def main(
         logger.info(f"Data processed: {df_train.shape[0]} training samples, {df_test.shape[0]} test samples")
         logger.info(f"Baseline models trained: {'Yes' if run_baseline else 'No'}")
         logger.info(f"Custom models trained: {len(custom_models) if custom_models else 0}")
+        logger.info(f"Hyperparameter optimization: {'Yes' if run_optimization else 'No'}")
         logger.info(f"Feature evaluation: {'Yes' if evaluate_features else 'No'}")
         
+        if optimization_results:
+            logger.info("\nBest optimization results:")
+            for model_type, result in optimization_results.items():
+                logger.info(f"  {model_type}: RMSE = {result['best_score']:.4f}")
         
         logger.info("Pipeline completed successfully!")
         
