@@ -56,8 +56,11 @@ Run the main script with the following command:
 #First install requirements 
 pip install -r requirements.txt
 
-python main.py --raw_data_path=<input_data_path> --dest_path=<destination_path> 
-
 #first load all the data from your input dir
 python data_preprocessing.py   --raw_data_path=<input_data_path> --dest_path=<destination_path>    --dataset=green   --taxi_zones_path=data/taxi_zones/taxi_zones.shp
 
+#then run  main.py (the baseline models only)
+python main.py  --raw_data_path=data/ --dest_path=data/output/    --dataset=green   --taxi_zones_path=data/taxi_zones/taxi_zones.shp  --run_baseline
+
+#then run  main.py (custom models with feature_eng only)
+python main.py  --raw_data_path=data/ --dest_path=data/output/    --dataset=green   --taxi_zones_path=data/taxi_zones/taxi_zones.shp  --feature_type=feature --run_custom 
