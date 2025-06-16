@@ -89,8 +89,6 @@ def main(
     feature_type: str,
     run_baseline: bool,
     run_custom: bool,
-    run_optimization: bool,
-    n_trials: int,
     evaluate_features: bool
 ) -> None:
     """Main execution pipeline with configurable training options."""
