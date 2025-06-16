@@ -76,18 +76,6 @@ run_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
     help="Run custom models training"
 )
 @click.option(
-    "--run_optimization",
-    is_flag=True,
-    default=False,
-    help="Run hyperparameter optimization"
-)
-@click.option(
-    "--n_trials",
-    default=50,
-    type=int,
-    help="Number of optimization trials for Optuna"
-)
-@click.option(
     "--evaluate_features",
     is_flag=True,
     default=False,
