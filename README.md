@@ -64,3 +64,6 @@ python main.py  --raw_data_path=data/ --dest_path=data/output/    --dataset=gree
 
 #then run  main.py (custom models with feature_eng only)
 python main.py  --raw_data_path=data/ --dest_path=data/output/    --dataset=green   --taxi_zones_path=data/taxi_zones/taxi_zones.shp  --feature_type=feature --run_custom 
+
+#run  main.py (to check the results of the most important features against our target=duration)
+python main.py  --raw_data_path=data/ --dest_path=data/output/    --dataset=green   --taxi_zones_path=data/taxi_zones/taxi_zones.shp  --feature_type=feature  --evaluate_features
