@@ -188,11 +188,10 @@ def train_custom_model(train_data, test_data, target='duration'):
     y_train = train_data[target].values
     y_test = test_data[target].values
 
-    #numerical_columns = ['fare_amount', 'total_amount', 'trip_distance']
-    numerical_columns = ['fare_amount', 'total_amount',]
+    numerical_columns = ['fare_amount', 'total_amount', 'trip_distance']
     # categorical_columns = ['PULocationID', 'DOLocationID', 
     #                       'time_of_day', 'pickup_day', 'PU_DO']
-    categorical_columns = ['PULocationID', 'time_of_day', 'pickup_day']
+    categorical_columns = ['PULocationID', 'time_of_day', 'pickup_day', 'pickup_zone','PU_DO']
 
     columns_taxi_zone = ['pickup_borough', 'drop_zone', 'drop_borough']
     columns_to_keep = numerical_columns + categorical_columns + columns_taxi_zone
@@ -274,6 +273,152 @@ def train_custom_model(train_data, test_data, target='duration'):
 
     return results
 
+def optimize_hyperparameters(train_data, test_data, target='duration', model_type='random_forest', n_trials=10, run_datetime=None, study_name=None):
+    """
+    Optimize hyperparameters using Optuna with MLflow integration.
+    """
+    y_train = train_data[target].values
+    y_test = test_data[target].values
+
+    # Prepare data
+    numerical_columns = ['fare_amount', 'total_amount']
+    categorical_columns = ['PULocationID', 'DOLocationID', 'time_of_day', 'pickup_day', 'pickup_zone']
+    columns_taxi_zone = ['pickup_borough', 'drop_zone', 'drop_borough']
+    columns_to_keep = numerical_columns + categorical_columns + columns_taxi_zone
+
+    train_df = train_data[columns_to_keep].copy()
+    test_df = test_data[columns_to_keep].copy()
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', Pipeline([
+                ('imputer', SimpleImputer(strategy='median')),
+                ('scaler', StandardScaler())
+            ]), numerical_columns),
+            ('cat', Pipeline([
+                ('imputer', SimpleImputer(strategy='most_frequent')),
+                ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+            ]), categorical_columns)
+        ],
+        remainder='drop'
+    )
+
+    X_train = preprocessor.fit_transform(train_df)
+    X_test = preprocessor.transform(test_df)
+
+    def objective(trial):
+        if model_type == 'random_forest':
+            params = {
+                'n_estimators': trial.suggest_int('n_estimators', 50, 150),
+                'max_depth': trial.suggest_int('max_depth', 5, 25),
+                'min_samples_split': trial.suggest_int('min_samples_split', 2, 20),
+                'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 20),
+                'max_features': trial.suggest_categorical('max_features', ['sqrt', 'log2', None]),
+                'random_state': 42,
+                'n_jobs': -1
+            }
+            model = RandomForestRegressor(**params)
+
+        elif model_type == 'lightgbm':
+            params = {
+                'n_estimators': trial.suggest_int('n_estimators', 50, 150),
+                'max_depth': trial.suggest_int('max_depth', 3, 15),
+                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3),
+                'min_child_samples': trial.suggest_int('min_child_samples', 5, 50),
+                'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+                'random_state': 42,
+                'verbose': -1
+            }
+            model = LGBMRegressor(**params)
+
+        elif model_type == 'gradient_boosting':
+            params = {
+                'n_estimators': trial.suggest_int('n_estimators', 50, 150),
+                'max_depth': trial.suggest_int('max_depth', 3, 15),
+                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3),
+                'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 20),
+                'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+                'random_state': 42
+            }
+            model = GradientBoostingRegressor(**params)
+
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
+
+        model.fit(X_train, y_train)
+        preds = model.predict(X_test)
+
+        rmse = np.sqrt(mean_squared_error(y_test, preds))
+        trial.set_user_attr('mae', mean_absolute_error(y_test, preds))
+        trial.set_user_attr('r2', r2_score(y_test, preds))
+
+        return rmse
+
+    mlflc = MLflowCallback(
+        tracking_uri=mlflow.get_tracking_uri(),
+        metric_name="rmse"
+    )
+
+    study = optuna.create_study(
+        direction="minimize",
+        study_name=study_name,
+        sampler=optuna.samplers.TPESampler(seed=42)
+    )
+
+    study.optimize(objective, n_trials=n_trials, callbacks=[mlflc])
+
+    # Log best params and metrics to active run
+    best_params = study.best_params
+    best_value = study.best_value
+
+    mlflow.log_params(best_params)
+    mlflow.log_metrics({
+        "best_rmse": best_value,
+        "best_mae": study.best_trial.user_attrs.get('mae', 0),
+        "best_r2": study.best_trial.user_attrs.get('r2', 0),
+        "n_trials": n_trials
+    })
+
+    # Train final model
+    if model_type == 'random_forest':
+        best_model = RandomForestRegressor(**best_params)
+    elif model_type == 'lightgbm':
+        best_model = LGBMRegressor(**best_params)
+    elif model_type == 'gradient_boosting':
+        best_model = GradientBoostingRegressor(**best_params)
+
+    final_pipeline = Pipeline([
+        ('preprocessor', preprocessor),
+        ('model', best_model)
+    ])
+
+    final_pipeline.fit(train_data, y_train)
+    final_preds = final_pipeline.predict(test_data)
+
+    # Log model
+    signature = infer_signature(train_data, final_preds[:5])
+    mlflow.sklearn.log_model(
+        final_pipeline,
+        f"optimized_{model_type}_model",
+        signature=signature
+    )
+
+    # Log prediction plot
+    log_prediction_plot(y_test, final_preds, f"optimized_{model_type}", sample_size=500)
+
+    logger.info(f"Optimization completed for {model_type}")
+    logger.info(f"Best RMSE: {best_value:.4f}")
+    logger.info(f"Best parameters: {best_params}")
+
+    return {
+        'study': study,
+        'best_params': best_params,
+        'best_score': best_value,
+        'model': final_pipeline,
+        'predictions': final_preds
+    }
+
 
 def predict_trip_duration(results, model_type, input_data, feature_engineering=False):
     model_info = results[model_type]
@@ -289,27 +434,22 @@ def predict_trip_duration(results, model_type, input_data, feature_engineering=F
         features = [
             'PULocationID', 'DOLocationID', 'PU_DO_grouped', 
             'time_of_day', 'pickup_day','pickup_month', 'pickup_hour',
-            'fare_amount', 'total_amount',  'trip_distance', 'PU_DO'
+            'fare_amount', 'total_amount',  'trip_distance', 'PU_DO', 'pickup_dayofweek'
         ]
         available_features = [f for f in features if f in input_data.columns]
         input_data = input_data[available_features]
     
     return model.predict(input_data)
 
-def log_prediction_plot(y_true, y_pred, model_name, sample_size=10000):
+
+def log_prediction_plot(y_true, y_pred, model_name, sample_size=500):
     """
     Optimized prediction plotting function
     """
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    
-    # Calculate R² on full data first
-    r2_full = r2_score(y_true, y_pred)
-    
-    # Filter data for trips between 0-20 minutes AFTER scoring
-    mask = (y_true >= 0) & (y_true <= 20)
-    y_true_filtered = y_true[mask]
-    y_pred_filtered = y_pred[mask]
+    # Filter data for trips between 0-20 minutes
+    mask = (np.array(y_true) <= 20) & (np.array(y_true) >= 0)
+    y_true_filtered = np.array(y_true)[mask]
+    y_pred_filtered = np.array(y_pred)[mask]
     
     # Sample from filtered data if needed
     if len(y_true_filtered) > sample_size:
@@ -320,27 +460,39 @@ def log_prediction_plot(y_true, y_pred, model_name, sample_size=10000):
         y_true_plot = y_true_filtered
         y_pred_plot = y_pred_filtered
     
-    # Create plot
+    # Create plot with better performance
     fig, ax = plt.subplots(figsize=(8, 6))
     
+    # Use matplotlib directly for better performance
     ax.scatter(y_true_plot, y_pred_plot, alpha=0.6, s=20, color='#A0C4FF', edgecolors='white', linewidth=0.5)
+    
+    # Set fixed axis limits for 0-20 minute range
     ax.set_xlim(0, 20)
     ax.set_ylim(0, 20)
+    
+    # Plot identity line
     ax.plot([0, 20], [0, 20], 'k--', lw=2, alpha=0.8)
+    
+    # Labels and title
     ax.set_xlabel("Actual Duration (min)", fontsize=12)
     ax.set_ylabel("Predicted Duration (min)", fontsize=12)
     ax.set_title(f"{model_name} — Predicted vs Actual", fontsize=14)
     ax.grid(True, alpha=0.3)
     
-    # Add R² on full data to plot
-    ax.text(0.05, 0.95, f'R² (full) = {r2_full:.3f}', transform=ax.transAxes, 
+    # Calculate and add R² to plot
+    r2 = r2_score(y_true_plot, y_pred_plot)
+    ax.text(0.05, 0.95, f'R² = {r2:.3f}', transform=ax.transAxes, 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
-    # Save and log
+    # Save plot
     plot_path = f"{model_name}_prediction_plot.png"
     fig.tight_layout()
     fig.savefig(plot_path, dpi=100, bbox_inches='tight')
+    
+    # Log figure as artifact to MLflow
     mlflow.log_artifact(plot_path)
+    
+    # Clean up
     plt.close(fig)
     if os.path.exists(plot_path):
         os.remove(plot_path)
@@ -389,3 +541,30 @@ def evaluate_features_fast(train_data, test_data, target='duration'):
     
     return sorted_features
 
+
+# Convenience function to run complete optimization workflow
+def run_optimization_workflow(train_data, test_data, model_types=['random_forest'], n_trials=10, target='duration'):
+    """
+    Runs the full hyperparameter optimization workflow.
+    """
+    run_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    for model_type in model_types:
+        study_name = f"{model_types}_optimization_{run_datetime}"
+        with mlflow.start_run(run_name=f"workflow_{study_name}") as parent_run:
+            logger.info(f"Started MLflow run with ID: {parent_run.info.run_id}")
+
+            results = optimize_hyperparameters(
+                train_data=train_data,
+                test_data=test_data,
+                target=target,
+                model_type=model_type,
+                n_trials=n_trials,
+                run_datetime=run_datetime,
+                study_name=study_name
+            )
+
+            logger.info(f"Optimization completed for {model_type}. Best RMSE: {results['best_score']:.4f}")
+            results[model_type] = results
+    
+    return results
