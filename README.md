@@ -28,7 +28,7 @@ Two workflows:
 
 2. **Custom Feature-Engineered Models**
    - Same models, trained on engineered features (set a combination of them):
-     - `PU_DO`, `pickup_day`, `time_of_day`, `is_weekend`,`trip_distance`
+     - `PULocationID`, `DOLocationID`, `PU_DO`,`pickup_day`, `time_of_day`, `is_weekend`,`trip_distance`
    - Includes custom MLflow run tags for categorical/numerical columns.
 
 
