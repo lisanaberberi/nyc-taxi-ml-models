@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/561657014646424793/5e388e22933b4babbe01ddc95deb634c/artifacts
+end_time: 1748262607675
+entry_point_name: ''
+experiment_id: '561657014646424793'
+lifecycle_stage: active
+run_id: 5e388e22933b4babbe01ddc95deb634c
+run_name: decision_tree_custom_model_20250526_140855
+run_uuid: 5e388e22933b4babbe01ddc95deb634c
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1748262578041
+status: 3
+tags: []
+user_id: lisana

@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/561657014646424793/591843dfb9444abab6d34d8d830c5c78/artifacts
+end_time: 1748274733556
+entry_point_name: ''
+experiment_id: '561657014646424793'
+lifecycle_stage: active
+run_id: 591843dfb9444abab6d34d8d830c5c78
+run_name: custom_models_20250526_173142
+run_uuid: 591843dfb9444abab6d34d8d830c5c78
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1748273517689
+status: 3
+tags: []
+user_id: lisana
