@@ -1,0 +1,49 @@
+cff-version: 1.2.0
+title: 'Evaluating Machine Learning Models for Trip Duration Prediction in Taxi Data'
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - family-names: Berberi
+    given-names: Lisana
+  - family-names: Gavoçi
+    given-names: Entelë
+  - family-names: Bushati
+    given-names: Senada
+  - family-names: Kroni
+    given-names: Fatjona
+repository-code: 'https://github.com/lisanaberberi/nyc-taxi-ml-models'
+abstract: 'Accurate estimation of trip duration using New York City taxi data is crucial to optimize urban transport systems and improve taxi service operations. This study compares the effectiveness of four standard regression models---Decision Tree Regressor, LightGBM Regressor, Random Forest Regressor, and Gradient Boosting Regressor---and then explores feature engineering methods to create four composite models and discusses their predictive capabilities.'
+keywords:
+  - machine learning
+  - taxi trip duration
+  - regression models
+  - NYC taxi data
+  - trip duration prediction
+license: MIT
+date-released: '2024-01-01'
+preferred-citation:
+  type: conference-paper
+  authors:
+    - family-names: Berberi
+      given-names: Lisana
+    - family-names: Gavoçi
+      given-names: Entelë
+    - family-names: Bushati
+      given-names: Senada
+    - family-names: Kroni
+      given-names: Fatjona
+  title: 'Evaluating Machine Learning Models for Trip Duration Prediction in Taxi Data'
+  collection-title: 'AI and Digital Transformation: Opportunities, Challenges, and Emerging Threats in Technology, Business, and Security'
+  editors:
+    - family-names: Dhoska
+      given-names: Klodian
+    - family-names: Spaho
+      given-names: Evjola
+  year: 2026
+  publisher:
+    name: Springer Nature Switzerland
+    city: Cham
+  start: 353
+  end: 369
+  isbn: 978-3-032-07373-0
+  doi: 10.1007/978-3-032-07373-0_26
